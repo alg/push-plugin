@@ -34,8 +34,7 @@ static char launchNotificationKey;
 @synthesize notificationMessage;
 @synthesize isInline;
 
-+ (instancetype)sharedInstance
-{
++ (instancetype)sharedInstance {
     static Push *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -44,8 +43,7 @@ static char launchNotificationKey;
     return sharedInstance;
 }
 
-- (void)areNotificationsEnabled
-{
+- (void)areNotificationsEnabled {
     BOOL registered;
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
     if ([[UIApplication sharedApplication] respondsToSelector:@selector(isRegisteredForRemoteNotifications)]) {
@@ -62,14 +60,12 @@ static char launchNotificationKey;
     [self success:areNotificationsEnabledEventName WithMessage:booleanString];
 }
 
-- (void)unregister
-{
+- (void)unregister {
     [[UIApplication sharedApplication] unregisterForRemoteNotifications];
     [self success:didUnregisterEventName WithMessage:@"Success"];
 }
 
--(void)register:(NSMutableDictionary *)options
-{
+-(void)register:(NSMutableDictionary *)options {
     isInline = NO;
 
     Push *push = [Push sharedInstance];
@@ -130,9 +126,7 @@ static char launchNotificationKey;
                                                handler:^(NSError *error) {
            if (error) {
                // Treat the "already subscribed" error more gently
-               if (error.code == 3001) {
-                   NSLog(@"Already subscribed to %@", SubscriptionTopic);
-               } else {
+               if (error.code != 3001) {
                    NSLog(@"Subscription failed: %@", error.localizedDescription);
                }
            } else {
@@ -143,8 +137,7 @@ static char launchNotificationKey;
     }
 }
 
-- (BOOL)isTrue:(NSString *)key fromOptions:(NSMutableDictionary *)options
-{
+- (BOOL)isTrue:(NSString *)key fromOptions:(NSMutableDictionary *)options {
     id arg = [options objectForKey:key];
     
     if([arg isKindOfClass:[NSString class]]) return [arg isEqualToString:@"true"];
@@ -173,13 +166,10 @@ static char launchNotificationKey;
                                                       handler:push.handler];
 }
 
-- (void)didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken
-{
+- (void)didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken {
     Push *push = [Push sharedInstance];
     push.deviceToken = deviceToken;
     
-    // [END receive_apns_token]
-    // [START get_gcm_reg_token]
     // Create a config and set a delegate that implements the GGLInstaceIDDelegate protocol.
     GGLInstanceIDConfig *instanceIDConfig = [GGLInstanceIDConfig defaultConfig];
     instanceIDConfig.delegate = self;
@@ -187,7 +177,6 @@ static char launchNotificationKey;
     // Start the GGLInstanceID shared instance with the that config and request a registration
     // token to enable reception of notifications
     [[GGLInstanceID sharedInstance] startWithConfig:instanceIDConfig];
-    NSLog(@"Instance ID config: %@", instanceIDConfig);
     
     NSDictionary *registrationOptions = @{kGGLInstanceIDRegisterAPNSOption:push.deviceToken,
                                            kGGLInstanceIDAPNSServerTypeSandboxOption:@(push.gcmSandbox)};
@@ -199,40 +188,31 @@ static char launchNotificationKey;
                                                       handler:push.handler];
 }
 
-- (void)didFailToRegisterForRemoteNotificationsWithError:(NSError *)error
-{
+- (void)didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     [self fail:didFailToRegisterEventName WithMessage:@"" withError:error];
 }
 
-- (void)notificationReceived
-{
-    NSLog(@"notificationReceived");
-    
-    if (self.notificationMessage)
-    {
+- (void)notificationReceived {
+    if (self.notificationMessage) {
         
         NSMutableString *jsonStr = [NSMutableString stringWithString:@"{"];
         
         [self parseDictionary:self.notificationMessage intoJSON:jsonStr];
         
-        if (isInline)
-        {
+        if (isInline) {
             [jsonStr appendFormat:@"\"foreground\":\"%d\"", 1];
             isInline = NO;
-        }
-        else
+        } else {
             [jsonStr appendFormat:@"\"foreground\":\"%d\"", 0];
+        }
         
         [jsonStr appendString:@"}"];
-        
-        NSLog(@"Msg: %@", jsonStr);
         
         [self success:notificationReceivedEventName WithMessage:jsonStr];
         self.notificationMessage = nil;
     }
 }
 
-/*
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     // Connect to the GCM server to receive non-APNS notifications
     [[GCMService sharedInstance] connectWithHandler:^(NSError *error) {
@@ -242,21 +222,39 @@ static char launchNotificationKey;
         } else {
             push.connectedToGCM = true;
             NSLog(@"Connected to GCM");
-            // [START_EXCLUDE]
             [push subscribeToTopic];
-            // [END_EXCLUDE]
         }
     }];
 }
-*/
 
--(void)parseDictionary:(NSDictionary *)inDictionary intoJSON:(NSMutableString *)jsonString
-{
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    [[GCMService sharedInstance] disconnect];
+    [Push sharedInstance].connectedToGCM = NO;
+}
+
+- (void)application:(UIApplication *)application didReceiveMessage:(NSDictionary *)userInfo {
+    [[GCMService sharedInstance] appDidReceiveMessage:userInfo];
+
+    UIApplicationState appState = UIApplicationStateActive;
+    if ([application respondsToSelector:@selector(applicationState)]) {
+        appState = application.applicationState;
+    }
+    
+    Push *push = [Push sharedInstance];
+    if (appState == UIApplicationStateActive) {
+        push.notificationMessage = userInfo;
+        push.isInline = YES;
+        [push notificationReceived];
+    } else {
+        push.launchNotification = userInfo;
+    }
+}
+
+- (void)parseDictionary:(NSDictionary *)inDictionary intoJSON:(NSMutableString *)jsonString {
     NSArray         *keys = [inDictionary allKeys];
     NSString        *key;
     
-    for (key in keys)
-    {
+    for (key in keys) {
         id thisObject = [inDictionary objectForKey:key];
         
         if ([thisObject isKindOfClass:[NSDictionary class]])
@@ -274,17 +272,13 @@ static char launchNotificationKey;
     }
 }
 
-- (void)setApplicationIconBadgeNumber:(NSMutableDictionary *)options
-{
+- (void)setApplicationIconBadgeNumber:(NSMutableDictionary *)options {
     int badge = [[options objectForKey:badgeKey] intValue] ?: 0;
-    
     [[UIApplication sharedApplication] setApplicationIconBadgeNumber:badge];
-    
     [self success:setBadgeNumberEventName WithMessage:[NSString stringWithFormat:@"app badge count set to %d", badge]];
 }
 
-- (void)registerUserNotificationSettings:(NSDictionary*)options
-{
+- (void)registerUserNotificationSettings:(NSDictionary*)options {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
     if (![[UIApplication sharedApplication]respondsToSelector:@selector(registerUserNotificationSettings:)]) {
         [self success:didRegisterUserNotificationSettingsEventName WithMessage:[NSString stringWithFormat:@"%@", @"user notifications not supported for this ios version."]];

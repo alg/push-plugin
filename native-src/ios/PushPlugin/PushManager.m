@@ -15,127 +15,153 @@ static IMP didRegisterOriginalMethod = NULL;
 static IMP didFailOriginalMethod = NULL;
 static IMP didReceiveOriginalMethod = NULL;
 static IMP didReceiveFetchOriginalMethod = NULL;
-static IMP didBecomeActiveOriginalMethod = NULL;
 static IMP handleActionWithIdentifierOriginalMethod = NULL;
+
++ (void)captureDidRegisterForRemoteNotificationsWithDeviceToken {
+    UIApplication *app = [UIApplication sharedApplication];
+    id<UIApplicationDelegate> appDelegate = app.delegate;
+
+    Method didRegisterMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didRegisterForRemoteNotificationsWithDeviceToken:));
+    IMP didRegisterMethodImp = method_getImplementation(didRegisterMethod);
+    const char* didRegisterTypes = method_getTypeEncoding(didRegisterMethod);
+    
+    Method didRegisterOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didRegisterForRemoteNotificationsWithDeviceToken:));
+    if (didRegisterOriginal) {
+        didRegisterOriginalMethod = method_getImplementation(didRegisterOriginal);
+        method_exchangeImplementations(didRegisterOriginal, didRegisterMethod);
+    } else {
+        class_addMethod(appDelegate.class, @selector(application:didRegisterForRemoteNotificationsWithDeviceToken:), didRegisterMethodImp, didRegisterTypes);
+    }
+}
+
++ (void)captureDidFailToRegisterForRemoteNotificationsWithError {
+    UIApplication *app = [UIApplication sharedApplication];
+    id<UIApplicationDelegate> appDelegate = app.delegate;
+  
+    Method didFailMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didFailToRegisterForRemoteNotificationsWithError:));
+    IMP didFailMethodImp = method_getImplementation(didFailMethod);
+    const char* didFailTypes = method_getTypeEncoding(didFailMethod);
+    
+    Method didFailOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didFailToRegisterForRemoteNotificationsWithError:));
+    if (didFailOriginal) {
+        didFailOriginalMethod = method_getImplementation(didFailOriginal);
+        method_exchangeImplementations(didFailOriginal, didFailMethod);
+    } else {
+        class_addMethod(appDelegate.class, @selector(application:didFailToRegisterForRemoteNotificationsWithError:), didFailMethodImp, didFailTypes);
+    }
+}
+
++ (void)captureDidReceiveRemoteNotification {
+    UIApplication *app = [UIApplication sharedApplication];
+    id<UIApplicationDelegate> appDelegate = app.delegate;
+  
+    Method didReceiveMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didReceiveRemoteNotification:));
+    IMP didReceiveMethodImp = method_getImplementation(didReceiveMethod);
+    const char* didReceiveTypes = method_getTypeEncoding(didReceiveMethod);
+    
+    Method didReceiveOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:));
+    if (didReceiveOriginal) {
+        didReceiveOriginalMethod = method_getImplementation(didReceiveOriginal);
+        method_exchangeImplementations(didReceiveOriginal, didReceiveMethod);
+    } else {
+        class_addMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:), didReceiveMethodImp, didReceiveTypes);
+    }
+}
+
++ (void)captureDidReceiveRemoteNotificationFetchCompletionHandler {
+    UIApplication *app = [UIApplication sharedApplication];
+    id<UIApplicationDelegate> appDelegate = app.delegate;
+  
+    Method didReceiveFetchMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didReceiveRemoteNotification:fetchCompletionHandler:));
+    IMP didReceiveFetchMethodImp = method_getImplementation(didReceiveFetchMethod);
+    const char* didReceiveFetchTypes = method_getTypeEncoding(didReceiveFetchMethod);
+    
+    Method didReceiveFetchOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:));
+    if (didReceiveFetchOriginal) {
+        didReceiveFetchOriginalMethod = method_getImplementation(didReceiveFetchOriginal);
+        method_exchangeImplementations(didReceiveFetchOriginal, didReceiveFetchMethod);
+    } else {
+        class_addMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:), didReceiveFetchMethodImp, didReceiveFetchTypes);
+    }
+}
+
++ (void)captureHandleActionWithIdentifier {
+    UIApplication *app = [UIApplication sharedApplication];
+    id<UIApplicationDelegate> appDelegate = app.delegate;
+    
+    Method handleActionWithIdentifierMethod = class_getInstanceMethod([PushManager class], @selector(my_application:handleActionWithIdentifier:forRemoteNotification:completionHandler:));
+    IMP handleActionWithIdentifierMethodImp = method_getImplementation(handleActionWithIdentifierMethod);
+    const char* handleActionWithIdentifierTypes = method_getTypeEncoding(handleActionWithIdentifierMethod);
+    
+    Method handleActionWithIdentifierOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:handleActionWithIdentifier:forRemoteNotification:completionHandler:));
+    if (handleActionWithIdentifierOriginal) {
+        handleActionWithIdentifierOriginalMethod = method_getImplementation(handleActionWithIdentifierOriginal);
+        method_exchangeImplementations(handleActionWithIdentifierOriginal, handleActionWithIdentifierMethod);
+    } else {
+        class_addMethod(appDelegate.class, @selector(application:handleActionWithIdentifier:forRemoteNotification:completionHandler:), handleActionWithIdentifierMethodImp, handleActionWithIdentifierTypes);
+    }
+}
 
 + (void)load {
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
         
-        UIApplication *app = [UIApplication sharedApplication];
-        id<UIApplicationDelegate> appDelegate = app.delegate;
+        [PushManager captureDidRegisterForRemoteNotificationsWithDeviceToken];
+        [PushManager captureDidFailToRegisterForRemoteNotificationsWithError];
+        [PushManager captureDidReceiveRemoteNotification];
+        [PushManager captureDidReceiveRemoteNotificationFetchCompletionHandler];
         
-        // didBecomeActive swizzle
-        Method didBecomeActiveMethod = class_getInstanceMethod([PushManager class], @selector(my_applicationDidBecomeActive:));
-        IMP didBecomeActiveImp = method_getImplementation(didBecomeActiveMethod);
-        const char* didBecomeActiveTypes = method_getTypeEncoding(didBecomeActiveMethod);
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(my_applicationDidBecomeActive:)
+                                                     name:UIApplicationDidBecomeActiveNotification
+                                                   object:nil];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(my_applicationDidEnterBackground:)
+                                                     name:UIApplicationDidEnterBackgroundNotification
+                                                   object:nil];
         
-        Method didBecomeActiveOriginal = class_getInstanceMethod(appDelegate.class, @selector(applicationDidBecomeActive:));
-        if (didBecomeActiveOriginal) {
-            didBecomeActiveOriginalMethod = method_getImplementation(didBecomeActiveOriginal);
-            method_exchangeImplementations(didBecomeActiveOriginal, didBecomeActiveMethod);
-        } else {
-            class_addMethod(appDelegate.class, @selector(applicationDidBecomeActive:), didBecomeActiveImp, didBecomeActiveTypes);
-        }
-        
-        // didRegisterForRemoteNotificationsWithDeviceToken swizzle
-        Method didRegisterMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didRegisterForRemoteNotificationsWithDeviceToken:));
-        IMP didRegisterMethodImp = method_getImplementation(didRegisterMethod);
-        const char* didRegisterTypes = method_getTypeEncoding(didRegisterMethod);
-        
-        Method didRegisterOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didRegisterForRemoteNotificationsWithDeviceToken:));
-        if (didRegisterOriginal) {
-            didRegisterOriginalMethod = method_getImplementation(didRegisterOriginal);
-            method_exchangeImplementations(didRegisterOriginal, didRegisterMethod);
-        } else {
-            class_addMethod(appDelegate.class, @selector(application:didRegisterForRemoteNotificationsWithDeviceToken:), didRegisterMethodImp, didRegisterTypes);
-        }
-        
-        // didFailToRegisterForRemoteNotificationsWithError swizzle
-        Method didFailMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didFailToRegisterForRemoteNotificationsWithError:));
-        IMP didFailMethodImp = method_getImplementation(didFailMethod);
-        const char* didFailTypes = method_getTypeEncoding(didFailMethod);
-        
-        Method didFailOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didFailToRegisterForRemoteNotificationsWithError:));
-        if (didFailOriginal) {
-            didFailOriginalMethod = method_getImplementation(didFailOriginal);
-            method_exchangeImplementations(didFailOriginal, didFailMethod);
-        } else {
-            class_addMethod(appDelegate.class, @selector(application:didFailToRegisterForRemoteNotificationsWithError:), didFailMethodImp, didFailTypes);
-        }
-        
-        // didReceiveRemoteNotification swizzle
-        Method didReceiveMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didReceiveRemoteNotification:));
-        IMP didReceiveMethodImp = method_getImplementation(didReceiveMethod);
-        const char* didReceiveTypes = method_getTypeEncoding(didReceiveMethod);
-        
-        Method didReceiveOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:));
-        if (didReceiveOriginal) {
-            didReceiveOriginalMethod = method_getImplementation(didReceiveOriginal);
-            method_exchangeImplementations(didReceiveOriginal, didReceiveMethod);
-        } else {
-            class_addMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:), didReceiveMethodImp, didReceiveTypes);
-        }
-        
-        // didReceiveRemoteNotification:fetchCompletionHandler swizzle
-        Method didReceiveFetchMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didReceiveRemoteNotification:fetchCompletionHandler:));
-        IMP didReceiveFetchMethodImp = method_getImplementation(didReceiveFetchMethod);
-        const char* didReceiveFetchTypes = method_getTypeEncoding(didReceiveFetchMethod);
-        
-        Method didReceiveFetchOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:));
-        if (didReceiveFetchOriginal) {
-            didReceiveFetchOriginalMethod = method_getImplementation(didReceiveFetchOriginal);
-            method_exchangeImplementations(didReceiveFetchOriginal, didReceiveFetchMethod);
-        } else {
-            class_addMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:), didReceiveFetchMethodImp, didReceiveFetchTypes);
-        }
-        
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
-        // handleActionWithIdentifier swizzle
-        Method handleActionWithIdentifierMethod = class_getInstanceMethod([PushManager class], @selector(my_application:handleActionWithIdentifier:forRemoteNotification:completionHandler:));
-        IMP handleActionWithIdentifierMethodImp = method_getImplementation(handleActionWithIdentifierMethod);
-        const char* handleActionWithIdentifierTypes = method_getTypeEncoding(handleActionWithIdentifierMethod);
-        
-        Method handleActionWithIdentifierOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:handleActionWithIdentifier:forRemoteNotification:completionHandler:));
-        if (handleActionWithIdentifierOriginal) {
-            handleActionWithIdentifierOriginalMethod = method_getImplementation(handleActionWithIdentifierOriginal);
-            method_exchangeImplementations(handleActionWithIdentifierOriginal, handleActionWithIdentifierMethod);
-        } else {
-            class_addMethod(appDelegate.class, @selector(application:handleActionWithIdentifier:forRemoteNotification:completionHandler:), handleActionWithIdentifierMethodImp, handleActionWithIdentifierTypes);
-        }
+        #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
+        [PushManager captureHandleActionWithIdentifier];
         #endif
     }];
     
 }
 
--(id)init
-{
+-(id)init {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(createNotificationChecker:)
                                                  name:@"UIApplicationDidFinishLaunchingNotification" object:nil];
     return self;
 }
 
-- (void)createNotificationChecker:(NSNotification *)notification
-{
-    if (notification)
-    {
+- (void)createNotificationChecker:(NSNotification *)notification {
+    if (notification) {
         NSDictionary *launchOptions = [notification userInfo];
-        if (launchOptions)
+        if (launchOptions) {
             [Push sharedInstance].launchNotification = [launchOptions objectForKey: @"UIApplicationLaunchOptionsRemoteNotificationKey"];
+        }
     }
 }
 
-- (void)my_applicationDidBecomeActive:(UIApplication *)application
-{
-    if (didBecomeActiveOriginalMethod) {
-        void (*originalImp)(id, SEL, UIApplication *) = didBecomeActiveOriginalMethod;
-        originalImp(self, @selector(applicationDidBecomeActive:), application);
-    }
++ (void)my_applicationDidBecomeActive:(NSNotification *)notification {
+    
+    UIApplication *application = [UIApplication sharedApplication];
+    
     application.applicationIconBadgeNumber = 0;
+    
+    // Call Push so that it subscribes to GCMService
+    [[Push sharedInstance] applicationDidBecomeActive:application];
+    
     if ([Push sharedInstance].launchNotification) {
         [Push sharedInstance].notificationMessage  = [Push sharedInstance].launchNotification;
         [Push sharedInstance].launchNotification = nil;
         [[Push sharedInstance] performSelectorOnMainThread:@selector(notificationReceived) withObject:[Push sharedInstance]  waitUntilDone:NO];
     }
+}
+
+// Call Push so that it unsubscribes from GCMService
++ (void)my_applicationDidEnterBackground:(NSNotification *)notification {
+    UIApplication *application = [UIApplication sharedApplication];
+    [[Push sharedInstance] applicationDidEnterBackground:application];
 }
 
 - (void)my_application:(UIApplication *)application didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken {
@@ -148,50 +174,27 @@ static IMP handleActionWithIdentifierOriginalMethod = NULL;
 }
 
 - (void)my_application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
-    NSLog(@"didReceiveNotification");
     if (didReceiveOriginalMethod) {
         void (*originalImp)(id, SEL, UIApplication *, NSDictionary *) = didReceiveOriginalMethod;
         originalImp(self, @selector(application:didReceiveRemoteNotification:), application, userInfo);
     }
-    NSLog(@"didReceiveNotification 2");
-    
-    UIApplicationState appState = UIApplicationStateActive;
-    if ([application respondsToSelector:@selector(applicationState)]) {
-        appState = application.applicationState;
-    }
-    
-    if (appState == UIApplicationStateActive) {
-        [Push sharedInstance].notificationMessage = userInfo;
-        [Push sharedInstance].isInline = YES;
-        [[Push sharedInstance] notificationReceived];        
-    } else {
-        [Push sharedInstance].launchNotification = userInfo;
-    }
+
+    [[Push sharedInstance] application:application didReceiveMessage:userInfo];
 }
 
 - (void)my_application:(UIApplication *)application
     didReceiveRemoteNotification:(NSDictionary *)userInfo
     fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))handler {
-    NSLog(@"didReceiveNotification:fetchCompletionHandler");
     
     if (didReceiveFetchOriginalMethod) {
         void (*originalImp)(id, SEL, UIApplication *, NSDictionary *, void (^)(UIBackgroundFetchResult)) = didReceiveFetchOriginalMethod;
         originalImp(self, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:), application, userInfo, handler);
     }
-    NSLog(@"didReceiveNotification:fetchCompletionHandler 2");
+
+    [[Push sharedInstance] application:application didReceiveMessage:userInfo];
     
-    UIApplicationState appState = UIApplicationStateActive;
-    if ([application respondsToSelector:@selector(applicationState)]) {
-        appState = application.applicationState;
-    }
-    
-    if (appState == UIApplicationStateActive) {
-        [Push sharedInstance].notificationMessage = userInfo;
-        [Push sharedInstance].isInline = YES;
-        [[Push sharedInstance] notificationReceived];
-    } else {
-        [Push sharedInstance].launchNotification = userInfo;
-    }
+    // call completion handler with no data received result
+    handler(UIBackgroundFetchResultNoData);
 }
 
 - (void)my_application:(UIApplication *)application didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {

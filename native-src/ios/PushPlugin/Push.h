@@ -14,6 +14,7 @@
 
 + (instancetype)sharedInstance;
 
+-(void)application:(UIApplication *)application didReceiveMessage:(NSDictionary *)userInfo;
 -(void)register:(NSMutableDictionary *)options;
 -(void)unregister;
 -(void)areNotificationsEnabled;
