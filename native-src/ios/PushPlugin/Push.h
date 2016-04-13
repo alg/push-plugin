@@ -1,7 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIApplication.h>
+#import <Google/CloudMessaging.h>
 
-@interface Push : NSObject <UIApplicationDelegate>
+@interface Push : NSObject <UIApplicationDelegate, GGLInstanceIDDelegate>
 {
     NSDictionary *notificationMessage;
     BOOL    isInline;

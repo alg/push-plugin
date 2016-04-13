@@ -15,7 +15,19 @@ const NSString * setBadgeNumberEventName = @"setApplicationIconBadgeNumber";
 const NSString * didRegisterUserNotificationSettingsEventName = @"didRegisterUserNotificationSettings";
 const NSString * failToRegisterUserNotificationSettingsEventName = @"failToRegisterUserNotificationSettings";
 
+NSString *const SubscriptionTopic = @"/topics/global";
+
 static char launchNotificationKey;
+
+@interface Push ()
+@property(nonatomic, strong) void (^handler) (NSString *registrationToken, NSError *error);
+@property(nonatomic, strong) NSString *gcmSenderID;
+@property(nonatomic, strong) NSString *deviceToken;
+@property(nonatomic, strong) NSString *registrationToken;
+@property(nonatomic, assign) BOOL gcmSandbox;
+@property(nonatomic, assign) BOOL subscribedToTopic;
+@property(nonatomic, assign) BOOL connectedToGCM;
+@end
 
 @implementation Push
 
@@ -58,42 +70,77 @@ static char launchNotificationKey;
 
 -(void)register:(NSMutableDictionary *)options
 {
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
-    UIUserNotificationType UserNotificationTypes = UIUserNotificationTypeNone;
-    if([self isTrue: badgeKey fromOptions: options]) UserNotificationTypes |= UIUserNotificationTypeBadge;
-    if([self isTrue: soundKey fromOptions: options]) UserNotificationTypes |= UIUserNotificationTypeSound;
-    if([self isTrue: alertKey fromOptions: options]) UserNotificationTypes |= UIUserNotificationTypeAlert;
-#endif
-    UIRemoteNotificationType notificationTypes = UIRemoteNotificationTypeNone;
-    notificationTypes |= UIRemoteNotificationTypeNewsstandContentAvailability;
-    
-    if([self isTrue: badgeKey fromOptions: options]) notificationTypes |= UIRemoteNotificationTypeBadge;
-    if([self isTrue: soundKey fromOptions: options]) notificationTypes |= UIRemoteNotificationTypeSound;
-    if([self isTrue: alertKey fromOptions: options]) notificationTypes |= UIRemoteNotificationTypeAlert;
-
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
-    UserNotificationTypes |= UIUserNotificationActivationModeBackground;
-#endif
-    
-    if (notificationTypes == UIRemoteNotificationTypeNone)
-        NSLog(@"PushPlugin.register: Push notification type is set to none");
-    
     isInline = NO;
+
+    Push *push = [Push sharedInstance];
+    push.gcmSenderID = [options objectForKey:@"senderID"];
+    push.gcmSandbox  = [self isTrue:@"sandbox" fromOptions:options];
     
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
-    if ([[UIApplication sharedApplication]respondsToSelector:@selector(registerUserNotificationSettings:)]) {
+    GCMConfig *gcmConfig = [GCMConfig defaultConfig];
+    gcmConfig.receiverDelegate = self;
+    [[GCMService sharedInstance] startWithConfig:gcmConfig];
+    
+    push.handler = ^(NSString *registrationToken, NSError *error) {
+        if (registrationToken != nil) {
+            push.registrationToken = registrationToken;
+            [push subscribeToTopic];
+            [[NSNotificationCenter defaultCenter]
+                 postNotificationName:didRegisterEventName
+                 object:self
+                 userInfo:@{@"message":registrationToken}];
+        } else {
+            [[NSNotificationCenter defaultCenter]
+                 postNotificationName:didFailToRegisterEventName
+                 object:self
+                 userInfo:@{@"error":error.localizedDescription}];
+        }
+    };
+
+    if (floor(NSFoundationVersionNumber) <= NSFoundationVersionNumber_iOS_7_1) {
+        // iOS 7.1 or earlier
+        UIRemoteNotificationType notificationTypes = UIRemoteNotificationTypeNone;
+        notificationTypes |= UIRemoteNotificationTypeNewsstandContentAvailability;
+        
+        if([self isTrue: badgeKey fromOptions: options]) notificationTypes |= UIRemoteNotificationTypeBadge;
+        if([self isTrue: soundKey fromOptions: options]) notificationTypes |= UIRemoteNotificationTypeSound;
+        if([self isTrue: alertKey fromOptions: options]) notificationTypes |= UIRemoteNotificationTypeAlert;
+
+        [[UIApplication sharedApplication] registerForRemoteNotificationTypes:notificationTypes];
+    } else {
+        // iOS 8 or later
+        UIUserNotificationType UserNotificationTypes = UIUserNotificationTypeNone;
+        if([self isTrue: badgeKey fromOptions: options]) UserNotificationTypes |= UIUserNotificationTypeBadge;
+        if([self isTrue: soundKey fromOptions: options]) UserNotificationTypes |= UIUserNotificationTypeSound;
+        if([self isTrue: alertKey fromOptions: options]) UserNotificationTypes |= UIUserNotificationTypeAlert;
+        UserNotificationTypes |= UIUserNotificationActivationModeBackground;
+
         UIUserNotificationSettings *settings = [UIUserNotificationSettings settingsForTypes:UserNotificationTypes categories:nil];
         [[UIApplication sharedApplication] registerUserNotificationSettings:settings];
         [[UIApplication sharedApplication] registerForRemoteNotifications];
-    } else {
-        [[UIApplication sharedApplication] registerForRemoteNotificationTypes:notificationTypes];
     }
-#else
-    [[UIApplication sharedApplication] registerForRemoteNotificationTypes:notificationTypes];
-#endif
+}
 
-    if (notificationMessage)
-        [self notificationReceived];
+- (void)subscribeToTopic {
+    // If the app has a registration token and is connected to GCM, proceed to subscribe to the
+    // topic
+    if (_registrationToken && _connectedToGCM) {
+        [[GCMPubSub sharedInstance] subscribeWithToken:_registrationToken
+                                                 topic:SubscriptionTopic
+                                               options:nil
+                                               handler:^(NSError *error) {
+           if (error) {
+               // Treat the "already subscribed" error more gently
+               if (error.code == 3001) {
+                   NSLog(@"Already subscribed to %@", SubscriptionTopic);
+               } else {
+                   NSLog(@"Subscription failed: %@", error.localizedDescription);
+               }
+           } else {
+               self.subscribedToTopic = true;
+               NSLog(@"Subscribed to %@", SubscriptionTopic);
+           }
+        }];
+    }
 }
 
 - (BOOL)isTrue:(NSString *)key fromOptions:(NSMutableDictionary *)options
@@ -101,60 +148,55 @@ static char launchNotificationKey;
     id arg = [options objectForKey:key];
     
     if([arg isKindOfClass:[NSString class]]) return [arg isEqualToString:@"true"];
-
     if([arg boolValue]) return true;
     
     return false;
 }
 
+/**
+ *  Called when the system determines that tokens need to be refreshed.
+ *  This method is also called if Instance ID has been reset in which
+ *  case, tokens and `GcmPubSub` subscriptions also need to be refreshed.
+ *
+ *  Instance ID service will throttle the refresh event across all devices
+ *  to control the rate of token updates on application servers.
+ */
+- (void)onTokenRefresh {
+    Push *push = [Push sharedInstance];
+
+    NSDictionary *registrationOptions = @{kGGLInstanceIDRegisterAPNSOption:push.deviceToken,
+                                          kGGLInstanceIDAPNSServerTypeSandboxOption:@(push.gcmSandbox)};
+    
+    [[GGLInstanceID sharedInstance] tokenWithAuthorizedEntity:push.gcmSenderID
+                                                        scope:kGGLInstanceIDScopeGCM
+                                                      options:registrationOptions
+                                                      handler:push.handler];
+}
 
 - (void)didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken
 {
-    NSMutableDictionary *results = [NSMutableDictionary dictionary];
-    NSString *token = [[[[deviceToken description] stringByReplacingOccurrencesOfString:@"<"withString:@""]
-                        stringByReplacingOccurrencesOfString:@">" withString:@""]
-                       stringByReplacingOccurrencesOfString: @" " withString: @""];
-    [results setValue:token forKey:@"deviceToken"];
+    Push *push = [Push sharedInstance];
+    push.deviceToken = deviceToken;
     
-#if !TARGET_IPHONE_SIMULATOR
-    // Get Bundle Info for Remote Registration (handy if you have more than one app)
-    [results setValue:[[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleDisplayName"] forKey:@"appName"];
-    [results setValue:[[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"] forKey:@"appVersion"];
+    // [END receive_apns_token]
+    // [START get_gcm_reg_token]
+    // Create a config and set a delegate that implements the GGLInstaceIDDelegate protocol.
+    GGLInstanceIDConfig *instanceIDConfig = [GGLInstanceIDConfig defaultConfig];
+    instanceIDConfig.delegate = self;
+
+    // Start the GGLInstanceID shared instance with the that config and request a registration
+    // token to enable reception of notifications
+    [[GGLInstanceID sharedInstance] startWithConfig:instanceIDConfig];
+    NSLog(@"Instance ID config: %@", instanceIDConfig);
     
-    // Check what Notifications the user has turned on.  We registered for all three, but they may have manually disabled some or all of them.
-    NSUInteger rntypes = [[UIApplication sharedApplication] enabledRemoteNotificationTypes];
+    NSDictionary *registrationOptions = @{kGGLInstanceIDRegisterAPNSOption:push.deviceToken,
+                                           kGGLInstanceIDAPNSServerTypeSandboxOption:@(push.gcmSandbox)};
+
     
-    // Set the defaults to disabled unless we find otherwise...
-    NSString *pushBadge = @"disabled";
-    NSString *pushAlert = @"disabled";
-    NSString *pushSound = @"disabled";
-    
-    // Check what Registered Types are turned on. This is a bit tricky since if two are enabled, and one is off, it will return a number 2... not telling you which
-    // one is actually disabled. So we are literally checking to see if rnTypes matches what is turned on, instead of by number. The "tricky" part is that the
-    // single notification types will only match if they are the ONLY one enabled.  Likewise, when we are checking for a pair of notifications, it will only be
-    // true if those two notifications are on.  This is why the code is written this way
-    if(rntypes & UIRemoteNotificationTypeBadge){
-        pushBadge = @"enabled";
-    }
-    if(rntypes & UIRemoteNotificationTypeAlert) {
-        pushAlert = @"enabled";
-    }
-    if(rntypes & UIRemoteNotificationTypeSound) {
-        pushSound = @"enabled";
-    }
-    
-    [results setValue:pushBadge forKey:@"pushBadge"];
-    [results setValue:pushAlert forKey:@"pushAlert"];
-    [results setValue:pushSound forKey:@"pushSound"];
-    
-    // Get the users Device Model, Display Name, Token & Version Number
-    UIDevice *dev = [UIDevice currentDevice];
-    [results setValue:dev.name forKey:@"deviceName"];
-    [results setValue:dev.model forKey:@"deviceModel"];
-    [results setValue:dev.systemVersion forKey:@"deviceSystemVersion"];
-    
-    [self success:didRegisterEventName WithMessage:[NSString stringWithFormat:@"%@", token]];
-#endif
+    [[GGLInstanceID sharedInstance] tokenWithAuthorizedEntity:push.gcmSenderID
+                                                        scope:kGGLInstanceIDScopeGCM
+                                                      options:registrationOptions
+                                                      handler:push.handler];
 }
 
 - (void)didFailToRegisterForRemoteNotificationsWithError:(NSError *)error
@@ -164,6 +206,8 @@ static char launchNotificationKey;
 
 - (void)notificationReceived
 {
+    NSLog(@"notificationReceived");
+    
     if (self.notificationMessage)
     {
         
@@ -187,6 +231,24 @@ static char launchNotificationKey;
         self.notificationMessage = nil;
     }
 }
+
+/*
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+    // Connect to the GCM server to receive non-APNS notifications
+    [[GCMService sharedInstance] connectWithHandler:^(NSError *error) {
+        Push *push = [Push sharedInstance];
+        if (error) {
+            NSLog(@"Could not connect to GCM: %@", error.localizedDescription);
+        } else {
+            push.connectedToGCM = true;
+            NSLog(@"Connected to GCM");
+            // [START_EXCLUDE]
+            [push subscribeToTopic];
+            // [END_EXCLUDE]
+        }
+    }];
+}
+*/
 
 -(void)parseDictionary:(NSDictionary *)inDictionary intoJSON:(NSMutableString *)jsonString
 {

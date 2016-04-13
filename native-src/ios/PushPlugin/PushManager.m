@@ -14,6 +14,7 @@ void myFunction() {
 static IMP didRegisterOriginalMethod = NULL;
 static IMP didFailOriginalMethod = NULL;
 static IMP didReceiveOriginalMethod = NULL;
+static IMP didReceiveFetchOriginalMethod = NULL;
 static IMP didBecomeActiveOriginalMethod = NULL;
 static IMP handleActionWithIdentifierOriginalMethod = NULL;
 
@@ -75,7 +76,20 @@ static IMP handleActionWithIdentifierOriginalMethod = NULL;
             class_addMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:), didReceiveMethodImp, didReceiveTypes);
         }
         
-        #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
+        // didReceiveRemoteNotification:fetchCompletionHandler swizzle
+        Method didReceiveFetchMethod = class_getInstanceMethod([PushManager class], @selector(my_application:didReceiveRemoteNotification:fetchCompletionHandler:));
+        IMP didReceiveFetchMethodImp = method_getImplementation(didReceiveFetchMethod);
+        const char* didReceiveFetchTypes = method_getTypeEncoding(didReceiveFetchMethod);
+        
+        Method didReceiveFetchOriginal = class_getInstanceMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:));
+        if (didReceiveFetchOriginal) {
+            didReceiveFetchOriginalMethod = method_getImplementation(didReceiveFetchOriginal);
+            method_exchangeImplementations(didReceiveFetchOriginal, didReceiveFetchMethod);
+        } else {
+            class_addMethod(appDelegate.class, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:), didReceiveFetchMethodImp, didReceiveFetchTypes);
+        }
+        
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
         // handleActionWithIdentifier swizzle
         Method handleActionWithIdentifierMethod = class_getInstanceMethod([PushManager class], @selector(my_application:handleActionWithIdentifier:forRemoteNotification:completionHandler:));
         IMP handleActionWithIdentifierMethodImp = method_getImplementation(handleActionWithIdentifierMethod);
@@ -134,11 +148,12 @@ static IMP handleActionWithIdentifierOriginalMethod = NULL;
 }
 
 - (void)my_application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
+    NSLog(@"didReceiveNotification");
     if (didReceiveOriginalMethod) {
         void (*originalImp)(id, SEL, UIApplication *, NSDictionary *) = didReceiveOriginalMethod;
         originalImp(self, @selector(application:didReceiveRemoteNotification:), application, userInfo);
     }
-    NSLog(@"didReceiveNotification");
+    NSLog(@"didReceiveNotification 2");
     
     UIApplicationState appState = UIApplicationStateActive;
     if ([application respondsToSelector:@selector(applicationState)]) {
@@ -149,6 +164,31 @@ static IMP handleActionWithIdentifierOriginalMethod = NULL;
         [Push sharedInstance].notificationMessage = userInfo;
         [Push sharedInstance].isInline = YES;
         [[Push sharedInstance] notificationReceived];        
+    } else {
+        [Push sharedInstance].launchNotification = userInfo;
+    }
+}
+
+- (void)my_application:(UIApplication *)application
+    didReceiveRemoteNotification:(NSDictionary *)userInfo
+    fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))handler {
+    NSLog(@"didReceiveNotification:fetchCompletionHandler");
+    
+    if (didReceiveFetchOriginalMethod) {
+        void (*originalImp)(id, SEL, UIApplication *, NSDictionary *, void (^)(UIBackgroundFetchResult)) = didReceiveFetchOriginalMethod;
+        originalImp(self, @selector(application:didReceiveRemoteNotification:fetchCompletionHandler:), application, userInfo, handler);
+    }
+    NSLog(@"didReceiveNotification:fetchCompletionHandler 2");
+    
+    UIApplicationState appState = UIApplicationStateActive;
+    if ([application respondsToSelector:@selector(applicationState)]) {
+        appState = application.applicationState;
+    }
+    
+    if (appState == UIApplicationStateActive) {
+        [Push sharedInstance].notificationMessage = userInfo;
+        [Push sharedInstance].isInline = YES;
+        [[Push sharedInstance] notificationReceived];
     } else {
         [Push sharedInstance].launchNotification = userInfo;
     }
